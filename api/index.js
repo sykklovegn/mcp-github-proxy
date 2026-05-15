@@ -9,7 +9,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // GET 请求 - 健康检查
   if (req.method === 'GET') {
     return res.status(200).json({
       jsonrpc: '2.0',
@@ -21,16 +20,18 @@ export default async function handler(req, res) {
         },
         capabilities: {
           tools: {}
+        },
+        debug: {
+          hasToken: !!process.env.GITHUB_TOKEN,
+          tokenPrefix: process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.substring(0, 7) + '...' : 'none'
         }
       }
     });
   }
 
-  // POST 请求 - MCP 协议
   if (req.method === 'POST') {
     const body = req.body;
 
-    // Initialize
     if (body.method === 'initialize') {
       return res.status(200).json({
         jsonrpc: '2.0',
@@ -48,7 +49,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // List tools
     if (body.method === 'tools/list') {
       return res.status(200).json({
         jsonrpc: '2.0',
@@ -74,7 +74,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Call tool
     if (body.method === 'tools/call') {
       const { name, arguments: args } = body.params;
 
@@ -87,11 +86,21 @@ export default async function handler(req, res) {
             url = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
           }
 
+          console.log('Fetching URL:', url);
+          console.log('Has Token:', !!process.env.GITHUB_TOKEN);
+
+          const headers = {
+            'User-Agent': 'MCP-Proxy-Bot/1.0',
+            'Accept': 'application/vnd.github.v3.raw'
+          };
+
+          // 只在有 Token 的情况下添加 Authorization header
+          if (process.env.GITHUB_TOKEN) {
+            headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+          }
+
           const response = await axios.get(url, {
-            headers: {
-              'Authorization': process.env.GITHUB_TOKEN ? `token ${process.env.GITHUB_TOKEN}` : undefined,
-              'User-Agent': 'MCP-Proxy'
-            },
+            headers: headers,
             timeout: 15000
           });
 
@@ -108,6 +117,9 @@ export default async function handler(req, res) {
             }
           });
         } catch (error) {
+          console.error('Fetch error:', error.message);
+          console.error('Response:', error.response?.data);
+          
           return res.status(200).json({
             jsonrpc: '2.0',
             id: body.id,
@@ -116,7 +128,10 @@ export default async function handler(req, res) {
               message: error.message,
               data: {
                 url: args.url,
-                status: error.response?.status
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                hasToken: !!process.env.GITHUB_TOKEN,
+                headers: error.response?.headers
               }
             }
           });
@@ -133,7 +148,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Notifications/ping
     if (body.method === 'notifications/initialized' || body.method === 'ping') {
       return res.status(200).json({
         jsonrpc: '2.0',
